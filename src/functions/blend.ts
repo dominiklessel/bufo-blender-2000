@@ -1,6 +1,11 @@
 import * as fs from "fs";
 import * as path from "path";
-import { createCanvas, loadImage, Image } from "canvas";
+import {
+  createCanvas,
+  loadImage,
+  Image,
+  ImageData as CanvasImageData,
+} from "canvas";
 
 interface EmojiData {
   path: string;
@@ -12,6 +17,13 @@ interface EmojiData {
 
 // Add Canvas type to avoid TypeScript errors
 type Canvas = ReturnType<typeof createCanvas>;
+
+// Add custom ImageData type that matches node-canvas implementation
+type CustomImageData = {
+  data: Uint8ClampedArray;
+  width: number;
+  height: number;
+};
 
 export interface RGB {
   r: number;
@@ -25,8 +37,11 @@ export interface HSL {
   l: number;
 }
 
-// Add this cache at the module level, before the createPngOutput function
+// Add these caches at the module level
 const emojiImageCache = new Map<string, Image>();
+const emojiDataCache = new Map<string, EmojiData>();
+const emojiCanvasCache = new Map<string, CustomImageData>();
+let cachedEmojiSize: number | null = null;
 
 export async function loadEmojiData(
   emojiDirPath: string,
@@ -205,39 +220,70 @@ export async function createPngOutput(
   emojiData: EmojiData[],
   alphaData: number[],
 ): Promise<Canvas> {
-  // Create a mapping of filenames to emoji data for quick lookup
-  const emojiMap = new Map<string, EmojiData>();
-  emojiData.forEach((emoji) => {
-    const filename = path.basename(emoji.path);
-    emojiMap.set(filename, emoji);
-  });
+  // Initialize emoji size if not cached
+  if (!cachedEmojiSize) {
+    const firstEmoji = await loadImage(emojiData[0].path);
+    cachedEmojiSize = firstEmoji.width;
+  }
+  const emojiSize = cachedEmojiSize;
 
-  // Calculate emoji size using the first emoji
-  const firstEmoji = await loadImage(emojiData[0].path);
-  const emojiSize = firstEmoji.width;
+  // Create or update emoji data cache
+  if (emojiDataCache.size === 0) {
+    emojiData.forEach((emoji) => {
+      const filename = path.basename(emoji.path);
+      emojiDataCache.set(filename, emoji);
+    });
+  }
 
-  // Create canvas for the final image with transparency support
+  // Create canvas for the final image
   const outputCanvas = createCanvas(width * emojiSize, height * emojiSize);
   const ctx = outputCanvas.getContext("2d");
-  ctx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
 
-  // Preload all unique emojis that we'll need
+  // Create temporary canvas for emoji preparation
+  const tempCanvas = createCanvas(emojiSize, emojiSize);
+  const tempCtx = tempCanvas.getContext("2d");
+
+  // Preload and prepare all unique emojis
   const uniqueEmojis = new Set(
     emojiGrid.filter((emoji) => emoji && emoji.length > 0),
   );
   await Promise.all(
     Array.from(uniqueEmojis).map(async (emojiFilename) => {
-      if (!emojiImageCache.has(emojiFilename)) {
-        const emoji = emojiMap.get(emojiFilename);
+      if (!emojiCanvasCache.has(emojiFilename)) {
+        const emoji = emojiDataCache.get(emojiFilename);
         if (emoji) {
-          const img = await loadImage(emoji.path);
-          emojiImageCache.set(emojiFilename, img);
+          // Load image if not cached
+          if (!emojiImageCache.has(emojiFilename)) {
+            const img = await loadImage(emoji.path);
+            emojiImageCache.set(emojiFilename, img);
+          }
+
+          // Prepare ImageData for this emoji
+          tempCtx.clearRect(0, 0, emojiSize, emojiSize);
+          tempCtx.drawImage(
+            emojiImageCache.get(emojiFilename)!,
+            0,
+            0,
+            emojiSize,
+            emojiSize,
+          );
+          emojiCanvasCache.set(
+            emojiFilename,
+            tempCtx.getImageData(0, 0, emojiSize, emojiSize) as CustomImageData,
+          );
         }
       }
     }),
   );
 
-  // Draw emojis using cached images
+  // Use a single ImageData for the entire output
+  const outputImageData = ctx.createImageData(
+    width * emojiSize,
+    height * emojiSize,
+  );
+  const outputData = outputImageData.data;
+
+  // Draw emojis using cached ImageData
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const index = y * width + x;
@@ -248,19 +294,34 @@ export async function createPngOutput(
         continue;
       }
 
-      const cachedImage = emojiImageCache.get(emojiFilename);
-      if (cachedImage) {
-        ctx.drawImage(
-          cachedImage,
-          x * emojiSize,
-          y * emojiSize,
-          emojiSize,
-          emojiSize,
-        );
+      const emojiImageData = emojiCanvasCache.get(emojiFilename);
+      if (emojiImageData) {
+        // Copy emoji data to the correct position in the output
+        const emojiData = emojiImageData.data;
+        const destX = x * emojiSize;
+        const destY = y * emojiSize;
+
+        for (let ey = 0; ey < emojiSize; ey++) {
+          for (let ex = 0; ex < emojiSize; ex++) {
+            const sourceIdx = (ey * emojiSize + ex) * 4;
+            const destIdx =
+              ((destY + ey) * (width * emojiSize) + (destX + ex)) * 4;
+
+            // Only copy if the source pixel is not fully transparent
+            if (emojiData[sourceIdx + 3] > 0) {
+              outputData[destIdx] = emojiData[sourceIdx];
+              outputData[destIdx + 1] = emojiData[sourceIdx + 1];
+              outputData[destIdx + 2] = emojiData[sourceIdx + 2];
+              outputData[destIdx + 3] = emojiData[sourceIdx + 3];
+            }
+          }
+        }
       }
     }
   }
 
+  // Put the final image data to the canvas
+  ctx.putImageData(outputImageData, 0, 0);
   return outputCanvas;
 }
 
