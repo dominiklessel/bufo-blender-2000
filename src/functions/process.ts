@@ -39,13 +39,20 @@ app.post("/", async (c) => {
   const buffer = Buffer.from(arrayBuffer);
   const width = parseInt(body.width);
 
+  console.time("processInputImage");
   const {
     pixels,
     width: outputWidth,
     height,
     alphaData,
   } = await processInputImage(buffer, width);
+  console.timeEnd("processInputImage");
+
+  console.time("mapPixelsToEmojis");
   const emojiGrid = mapPixelsToEmojis(pixels, emojiData, alphaData);
+  console.timeEnd("mapPixelsToEmojis");
+
+  console.time("createPngOutput");
   const outputCanvas = await createPngOutput(
     emojiGrid,
     outputWidth,
@@ -53,6 +60,7 @@ app.post("/", async (c) => {
     emojiData,
     alphaData,
   );
+  console.timeEnd("createPngOutput");
 
   const expiresIn = 60 * 10; // 10 minutes
   const bucket = Resource.BufoBlender2000Bucket;

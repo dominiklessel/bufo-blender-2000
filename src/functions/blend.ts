@@ -25,9 +25,12 @@ export interface HSL {
   l: number;
 }
 
+// Add this cache at the module level, before the createPngOutput function
+const emojiImageCache = new Map<string, Image>();
+
 export async function loadEmojiData(
   emojiDirPath: string,
-  metadataPath: string
+  metadataPath: string,
 ): Promise<EmojiData[]> {
   // Try to load preprocessed metadata
   if (fs.existsSync(metadataPath)) {
@@ -41,14 +44,14 @@ export async function loadEmojiData(
 
   // Fallback to processing emojis in real-time
   console.log(
-    "No preprocessed metadata found, analyzing emojis in real-time..."
+    "No preprocessed metadata found, analyzing emojis in real-time...",
   );
   const emojiFiles = fs
     .readdirSync(emojiDirPath)
     .filter((file) =>
       [".png", ".jpg", ".jpeg", ".gif"].includes(
-        path.extname(file).toLowerCase()
-      )
+        path.extname(file).toLowerCase(),
+      ),
     );
 
   const emojiData: EmojiData[] = [];
@@ -126,7 +129,7 @@ export async function getDominantColor(imagePath: string): Promise<{
 
 export async function processInputImage(
   inputPath: string | Buffer,
-  targetWidth: number
+  targetWidth: number,
 ): Promise<{
   pixels: RGB[];
   width: number;
@@ -168,7 +171,7 @@ export async function processInputImage(
 export function mapPixelsToEmojis(
   pixels: RGB[],
   emojiData: EmojiData[],
-  alphaData: number[]
+  alphaData: number[],
 ): string[] {
   return pixels.map((pixel, index) => {
     // If pixel is fully or mostly transparent, return empty string
@@ -200,7 +203,7 @@ export async function createPngOutput(
   width: number,
   height: number,
   emojiData: EmojiData[],
-  alphaData: number[]
+  alphaData: number[],
 ): Promise<Canvas> {
   // Create a mapping of filenames to emoji data for quick lookup
   const emojiMap = new Map<string, EmojiData>();
@@ -209,20 +212,32 @@ export async function createPngOutput(
     emojiMap.set(filename, emoji);
   });
 
-  // Calculate emoji size - assuming square emojis for simplicity
-  // Use the first emoji to determine size
+  // Calculate emoji size using the first emoji
   const firstEmoji = await loadImage(emojiData[0].path);
-  const emojiSize = firstEmoji.width; // Assuming square emojis
+  const emojiSize = firstEmoji.width;
 
   // Create canvas for the final image with transparency support
   const outputCanvas = createCanvas(width * emojiSize, height * emojiSize);
   const ctx = outputCanvas.getContext("2d");
-  // Make canvas transparent by default
   ctx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
 
-  // Draw each emoji on the canvas
-  const emojiPromises: Promise<void>[] = [];
+  // Preload all unique emojis that we'll need
+  const uniqueEmojis = new Set(
+    emojiGrid.filter((emoji) => emoji && emoji.length > 0),
+  );
+  await Promise.all(
+    Array.from(uniqueEmojis).map(async (emojiFilename) => {
+      if (!emojiImageCache.has(emojiFilename)) {
+        const emoji = emojiMap.get(emojiFilename);
+        if (emoji) {
+          const img = await loadImage(emoji.path);
+          emojiImageCache.set(emojiFilename, img);
+        }
+      }
+    }),
+  );
 
+  // Draw emojis using cached images
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const index = y * width + x;
@@ -233,25 +248,18 @@ export async function createPngOutput(
         continue;
       }
 
-      const emoji = emojiMap.get(emojiFilename);
-
-      if (emoji) {
-        const promise = loadImage(emoji.path).then((img) => {
-          ctx.drawImage(
-            img,
-            x * emojiSize,
-            y * emojiSize,
-            emojiSize,
-            emojiSize
-          );
-        });
-        emojiPromises.push(promise);
+      const cachedImage = emojiImageCache.get(emojiFilename);
+      if (cachedImage) {
+        ctx.drawImage(
+          cachedImage,
+          x * emojiSize,
+          y * emojiSize,
+          emojiSize,
+          emojiSize,
+        );
       }
     }
   }
-
-  // Wait for all emojis to be drawn
-  await Promise.all(emojiPromises);
 
   return outputCanvas;
 }
