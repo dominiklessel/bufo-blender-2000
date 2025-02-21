@@ -70,8 +70,8 @@ export default function BufoBlender() {
   const processImage = useCallback(
     async (file: File) => {
       try {
-        if (file.size > 3 * 1024 * 1024) {
-          toast.error("Image size should be less than 3MB");
+        if (file.size > 5 * 1024 * 1024) {
+          toast.error("Image size should be less than 5MB");
           return;
         }
 
