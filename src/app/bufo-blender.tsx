@@ -34,7 +34,7 @@ export default function BufoBlender() {
   );
   const [isProcessing, setIsProcessing] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
-  const [bufosPerRow, setBufosPerRow] = useState<number>(48);
+  const [bufosPerRow, setBufosPerRow] = useState<number>(128);
   const [currentFile, setCurrentFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -243,9 +243,9 @@ export default function BufoBlender() {
                 value={[bufosPerRow]}
                 onValueChange={handleSliderChange}
                 onValueCommit={handleSliderEnd}
-                min={20}
-                max={100}
-                step={1}
+                min={16}
+                max={256}
+                step={8}
                 className="w-full"
               />
               <span className="text-sm text-forest min-w-[3ch]">

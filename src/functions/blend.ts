@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import sharp from "sharp";
 import {
   createCanvas,
   loadImage,
@@ -43,10 +44,15 @@ const emojiDataCache = new Map<string, EmojiData>();
 const emojiCanvasCache = new Map<string, CustomImageData>();
 let cachedEmojiSize: number | null = null;
 
-export async function loadEmojiData(
-  emojiDirPath: string,
-  metadataPath: string,
-): Promise<EmojiData[]> {
+type LoadEmojiDataInput = {
+  emojiDirPath: string;
+  metadataPath: string;
+};
+
+export async function loadEmojiData({
+  emojiDirPath,
+  metadataPath,
+}: LoadEmojiDataInput) {
   // Try to load preprocessed metadata
   if (fs.existsSync(metadataPath)) {
     console.log("Using preprocessed emoji metadata...");
@@ -79,7 +85,7 @@ export async function loadEmojiData(
         color: dominantColor,
         width,
         height,
-      } = await getDominantColor(filePath);
+      } = await getDominantColor({ imagePath: filePath });
       const dominantHSL = RGBToHSL(dominantColor);
       emojiData.push({
         path: filePath,
@@ -96,11 +102,11 @@ export async function loadEmojiData(
   return emojiData;
 }
 
-export async function getDominantColor(imagePath: string): Promise<{
-  color: RGB;
-  width: number;
-  height: number;
-}> {
+type GetDominantColorInput = {
+  imagePath: string;
+};
+
+export async function getDominantColor({ imagePath }: GetDominantColorInput) {
   const image = await loadImage(imagePath);
   const canvas = createCanvas(image.width, image.height);
   const ctx = canvas.getContext("2d");
@@ -142,35 +148,43 @@ export async function getDominantColor(imagePath: string): Promise<{
   };
 }
 
-export async function processInputImage(
-  inputPath: string | Buffer,
-  targetWidth: number,
-): Promise<{
-  pixels: RGB[];
-  width: number;
-  height: number;
-  alphaData: number[];
-}> {
-  const image = await loadImage(inputPath);
+type ProcessInputImageInput = {
+  inputBuffer: Buffer;
+  targetWidth: number;
+};
+
+export async function processInputImage({
+  inputBuffer,
+  targetWidth,
+}: ProcessInputImageInput) {
+  // Use sharp to process the input image
+  const sharpImage = sharp(inputBuffer);
+  const metadata = await sharpImage.metadata();
+
+  if (!metadata.width || !metadata.height) {
+    throw new Error("Could not get image dimensions");
+  }
 
   // Calculate dimensions preserving aspect ratio
-  const aspectRatio = image.height / image.width;
+  const aspectRatio = metadata.height / metadata.width;
   const width = targetWidth;
   const height = Math.round(targetWidth * aspectRatio);
 
-  // Resize image
-  const canvas = createCanvas(width, height);
-  const ctx = canvas.getContext("2d");
-  ctx.drawImage(image, 0, 0, width, height);
+  // Resize image using sharp
+  const resizedImageBuffer = await sharpImage
+    .resize(width, height, {
+      fit: "contain",
+      withoutEnlargement: true,
+    })
+    .raw()
+    .toBuffer({ resolveWithObject: true });
 
-  // Get pixel data
-  const imageData = ctx.getImageData(0, 0, width, height);
-  const data = imageData.data;
-
-  // Convert to RGB array and store alpha values
+  // Extract pixel data and convert to RGB array
   const pixels: RGB[] = [];
   const alphaData: number[] = [];
+  const { data, info } = resizedImageBuffer;
 
+  // Sharp outputs pixels in RGBA format
   for (let i = 0; i < data.length; i += 4) {
     pixels.push({
       r: data[i],
@@ -180,14 +194,20 @@ export async function processInputImage(
     alphaData.push(data[i + 3]);
   }
 
-  return { pixels, width, height, alphaData };
+  return { pixels, width: info.width, height: info.height, alphaData };
 }
 
-export function mapPixelsToEmojis(
-  pixels: RGB[],
-  emojiData: EmojiData[],
-  alphaData: number[],
-): string[] {
+type MapPixelsToEmojisInput = {
+  pixels: RGB[];
+  emojiData: EmojiData[];
+  alphaData: number[];
+};
+
+export function mapPixelsToEmojis({
+  pixels,
+  emojiData,
+  alphaData,
+}: MapPixelsToEmojisInput) {
   return pixels.map((pixel, index) => {
     // If pixel is fully or mostly transparent, return empty string
     if (alphaData[index] < 50) {
@@ -213,19 +233,32 @@ export function mapPixelsToEmojis(
   });
 }
 
-export async function createPngOutput(
-  emojiGrid: string[],
-  width: number,
-  height: number,
-  emojiData: EmojiData[],
-  alphaData: number[],
-): Promise<Canvas> {
+type CreatePngOutputInput = {
+  emojiGrid: string[];
+  width: number;
+  height: number;
+  emojiData: EmojiData[];
+  alphaData: number[];
+};
+
+export async function createPngOutput({
+  emojiGrid,
+  width,
+  height,
+  emojiData,
+  alphaData,
+}: CreatePngOutputInput) {
   // Initialize emoji size if not cached
   if (!cachedEmojiSize) {
     const firstEmoji = await loadImage(emojiData[0].path);
     cachedEmojiSize = firstEmoji.width;
   }
-  const emojiSize = cachedEmojiSize;
+  const baseEmojiSize = cachedEmojiSize;
+
+  // Calculate scaling factor to fit within 2048px width
+  const rawOutputWidth = width * baseEmojiSize;
+  const scaleFactor = rawOutputWidth > 4096 ? 4096 / rawOutputWidth : 1;
+  const emojiSize = Math.round(baseEmojiSize * scaleFactor);
 
   // Create or update emoji data cache
   if (emojiDataCache.size === 0) {

@@ -30,7 +30,7 @@ export default $config({
       nodejs: {
         install: ["canvas"],
       },
-      handler: "src/functions/process.handler",
+      handler: "src/functions/process-handler.handler",
       copyFiles: [
         { from: "src/functions/all-the-bufo", to: "all-the-bufo" },
         {
