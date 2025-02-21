@@ -158,7 +158,11 @@ export async function processInputImage({
   targetWidth,
 }: ProcessInputImageInput) {
   // Use sharp to process the input image
-  const sharpImage = sharp(inputBuffer);
+  const sharpImage = sharp(inputBuffer)
+    .ensureAlpha() // Ensure alpha channel exists
+    .normalise() // Normalize the colors
+    .gamma(); // Apply gamma correction for better color representation
+
   const metadata = await sharpImage.metadata();
 
   if (!metadata.width || !metadata.height) {
@@ -170,12 +174,16 @@ export async function processInputImage({
   const width = targetWidth;
   const height = Math.round(targetWidth * aspectRatio);
 
-  // Resize image using sharp
+  // Resize image using sharp with better quality settings
   const resizedImageBuffer = await sharpImage
     .resize(width, height, {
       fit: "contain",
       withoutEnlargement: true,
+      kernel: "lanczos3", // Use higher quality resampling
     })
+    .removeAlpha() // Remove alpha channel temporarily
+    .normalise() // Normalize colors again after resize
+    .ensureAlpha() // Add back alpha channel
     .raw()
     .toBuffer({ resolveWithObject: true });
 

@@ -28,7 +28,7 @@ export default $config({
       runtime: "nodejs22.x",
       memory: "8192 MB",
       nodejs: {
-        install: ["canvas"],
+        install: ["canvas", "sharp"],
       },
       handler: "src/functions/process-handler.handler",
       copyFiles: [
