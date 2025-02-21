@@ -160,8 +160,7 @@ export async function processInputImage({
   // Use sharp to process the input image
   const sharpImage = sharp(inputBuffer)
     .ensureAlpha() // Ensure alpha channel exists
-    .normalise() // Normalize the colors
-    .gamma(); // Apply gamma correction for better color representation
+    .normalise(); // Normalize the colors
 
   const metadata = await sharpImage.metadata();
 
@@ -169,21 +168,25 @@ export async function processInputImage({
     throw new Error("Could not get image dimensions");
   }
 
+  // For SVGs and small images, use a larger minimum width to ensure enough detail
+  const minWidth = metadata.format === "svg" ? 256 : 128;
+  const adjustedTargetWidth = Math.max(targetWidth, minWidth);
+
   // Calculate dimensions preserving aspect ratio
   const aspectRatio = metadata.height / metadata.width;
-  const width = targetWidth;
-  const height = Math.round(targetWidth * aspectRatio);
+  const width = adjustedTargetWidth;
+  const height = Math.round(adjustedTargetWidth * aspectRatio);
 
   // Resize image using sharp with better quality settings
   const resizedImageBuffer = await sharpImage
     .resize(width, height, {
       fit: "contain",
-      withoutEnlargement: true,
+      withoutEnlargement: false, // Allow enlarging for SVGs and small images
       kernel: "lanczos3", // Use higher quality resampling
+      position: "center",
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
     })
-    .removeAlpha() // Remove alpha channel temporarily
     .normalise() // Normalize colors again after resize
-    .ensureAlpha() // Add back alpha channel
     .raw()
     .toBuffer({ resolveWithObject: true });
 
@@ -263,10 +266,21 @@ export async function createPngOutput({
   }
   const baseEmojiSize = cachedEmojiSize;
 
-  // Calculate scaling factor to fit within 2048px width
-  const rawOutputWidth = width * baseEmojiSize;
-  const scaleFactor = rawOutputWidth > 4096 ? 4096 / rawOutputWidth : 1;
-  const emojiSize = Math.round(baseEmojiSize * scaleFactor);
+  // Calculate optimal emoji size based on input dimensions
+  const MIN_EMOJI_SIZE = 32; // Minimum size to maintain emoji visibility
+  const MAX_OUTPUT_WIDTH = 4096; // Maximum output width
+
+  // Calculate initial emoji size based on desired output width
+  let emojiSize = Math.max(
+    MIN_EMOJI_SIZE,
+    Math.min(baseEmojiSize, Math.floor(MAX_OUTPUT_WIDTH / width)),
+  );
+
+  // Adjust emoji size if output would be too small
+  const minOutputWidth = Math.max(256, width * MIN_EMOJI_SIZE);
+  if (width * emojiSize < minOutputWidth) {
+    emojiSize = Math.ceil(minOutputWidth / width);
+  }
 
   // Create or update emoji data cache
   if (emojiDataCache.size === 0) {
