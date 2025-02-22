@@ -1,18 +1,20 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Lilita_One, Anek_Latin } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import { Analytics } from "@vercel/analytics/next";
 
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const lilita = Lilita_One({
+  variable: "--font-lilita",
   subsets: ["latin"],
+  weight: ["400"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const anek = Anek_Latin({
+  variable: "--font-anek",
   subsets: ["latin"],
+  weight: ["500", "600", "700"],
 });
 
 export const metadata: Metadata = {
@@ -31,7 +33,7 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-title" content="BBlender" />
       </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-cream`}
+        className={`${lilita.variable} ${anek.variable} ${anek.className} antialiased bg-cream-50 text-forest-800`}
       >
         <main>{children}</main>
         <Toaster />
