@@ -8,7 +8,7 @@ export default function NewLayout() {
         <div className="text-center">
           <div className="flex flex-col md:flex-row items-center justify-center gap-4 mb-4">
             <Image
-              src="/all-the-bufo/bufo-artist.png"
+              src="/bufo-artist.png"
               alt="Bufo Artist Logo"
               width={80}
               height={80}
@@ -23,8 +23,8 @@ export default function NewLayout() {
               Transform your images into a ribbiting masterpiece!
             </p>
             <Image
-              src="/all-the-bufo/bufo-fine-art.png"
-              alt="Bufo Artist Logo"
+              src="/bufo-fine-art.png"
+              alt="Bufo Fine Art"
               width={24}
               height={24}
               className="hidden md:block"
