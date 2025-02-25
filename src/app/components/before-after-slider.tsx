@@ -2,12 +2,13 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { cn } from "@/lib/utils";
+import { ArrowLeftRightIcon } from "lucide-react";
 
-interface BeforeAfterSliderProps {
+type BeforeAfterSliderProps = {
   beforeImage: string;
   afterImage: string;
   className?: string;
-}
+};
 
 export function BeforeAfterSlider({
   beforeImage,
@@ -83,7 +84,7 @@ export function BeforeAfterSlider({
         >
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-white rounded-full shadow-lg flex items-center justify-center">
             <div className="w-6 h-6 rounded-full bg-forest-700 flex items-center justify-center text-white">
-              ⇄
+              <ArrowLeftRightIcon className="h-4 w-4" />
             </div>
           </div>
         </div>

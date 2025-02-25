@@ -15,12 +15,18 @@ import NextImage from "next/image";
 import { cn } from "@/lib/utils";
 import { type WebEmojiMetadata } from "@/lib/common";
 import { RGB, RGBToHSL } from "@/lib/colors";
+import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
+import { PlusIcon, MinusIcon, RotateCcwIcon } from "lucide-react";
 
 export default function BufoMosaic() {
   const [imageDataURL, setImageDataURL] = useState<string | null>(null);
+  const [resizedImageDataURL, setResizedImageDataURL] = useState<string | null>(
+    null,
+  );
   const [mosaicDataURL, setMosaicDataURL] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showComparison, setShowComparison] = useState(false);
+  const [hasTransparency, setHasTransparency] = useState(false);
 
   const [targetSize, setTargetSize] = useState(4096);
   const [emojiDensity, setEmojiDensity] = useState(32);
@@ -30,15 +36,25 @@ export default function BufoMosaic() {
   const [isDragging, setIsDragging] = useState(false);
   const [fileName, setFileName] = useState<string>("");
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const resizeCanvasRef = useRef<HTMLCanvasElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const processFile = (file: File) => {
     // Clear the previous mosaic and aspect ratio
     setMosaicDataURL(null);
+    setResizedImageDataURL(null);
     setAspectRatio(null);
     setLoading(true);
     // Store filename without extension
     setFileName(file.name.replace(/\.[^/.]+$/, ""));
+
+    // Check if file might have transparency
+    const fileType = file.type.toLowerCase();
+    setHasTransparency(
+      fileType.includes("png") ||
+        fileType.includes("svg") ||
+        fileType.includes("webp"),
+    );
 
     const reader = new FileReader();
     reader.onloadend = () => {
@@ -83,6 +99,32 @@ export default function BufoMosaic() {
     }
   };
 
+  // Create a resized version of the input image to match mosaic dimensions
+  const resizeInputImage = (
+    originalImg: HTMLImageElement,
+    width: number,
+    height: number,
+  ) => {
+    if (!resizeCanvasRef.current) return;
+
+    const canvas = resizeCanvasRef.current;
+    const ctx = canvas.getContext("2d", { alpha: true });
+    if (!ctx) return;
+
+    canvas.width = width;
+    canvas.height = height;
+
+    // Clear canvas with transparent background
+    ctx.clearRect(0, 0, width, height);
+
+    // Draw the original image resized to match the mosaic dimensions
+    ctx.drawImage(originalImg, 0, 0, width, height);
+
+    // Get the resized image data URL with proper format to preserve transparency
+    const format = hasTransparency ? "image/png" : "image/jpeg";
+    setResizedImageDataURL(canvas.toDataURL(format));
+  };
+
   useEffect(() => {
     if (imageDataURL && canvasRef.current && aspectRatio) {
       // Wait for animation to complete
@@ -90,21 +132,34 @@ export default function BufoMosaic() {
         setLoading(true);
         const img = new Image();
         img.onload = () => {
+          // Calculate dimensions to maintain aspect ratio
+          let width, height;
+          if (aspectRatio > 1) {
+            width = targetSize;
+            height = targetSize / aspectRatio;
+          } else {
+            height = targetSize;
+            width = targetSize * aspectRatio;
+          }
+
+          // Create a resized version of the input image
+          resizeInputImage(img, width, height);
+
           createMosaic(img).then(() => {
-            setMosaicDataURL(
-              canvasRef.current!.toDataURL("image/jpeg") || null,
-            );
+            // Use PNG format for transparent images, JPEG for others
+            const format = hasTransparency ? "image/png" : "image/jpeg";
+            setMosaicDataURL(canvasRef.current!.toDataURL(format) || null);
             setLoading(false);
           });
         };
         img.src = imageDataURL;
       }, 150); // Match the animation duration
     }
-  }, [imageDataURL, aspectRatio]);
+  }, [imageDataURL, aspectRatio, hasTransparency]);
 
   const createMosaic = async (img: HTMLImageElement) => {
     const canvas = canvasRef.current!;
-    const ctx = canvas.getContext("2d")!;
+    const ctx = canvas.getContext("2d", { alpha: true })!;
     const aspectRatio = img.width / img.height;
 
     // Calculate dimensions to maintain aspect ratio within 2048x2048
@@ -120,9 +175,8 @@ export default function BufoMosaic() {
     canvas.width = width;
     canvas.height = height;
 
-    // Draw background
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Clear canvas with transparent background instead of white fill
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     // Draw original image (for color sampling)
     ctx.drawImage(img, 0, 0, width, height);
@@ -131,8 +185,7 @@ export default function BufoMosaic() {
     const originalImageData = ctx.getImageData(0, 0, width, height);
 
     // Clear the canvas again for the mosaic
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     const sampler = poissonDiscSampler(
       canvas.width,
@@ -157,6 +210,10 @@ export default function BufoMosaic() {
         const r = originalImageData.data[pixelIndex];
         const g = originalImageData.data[pixelIndex + 1];
         const b = originalImageData.data[pixelIndex + 2];
+        const a = originalImageData.data[pixelIndex + 3];
+
+        // Skip fully transparent pixels
+        if (a < 10) continue;
 
         const closestEmoji = findClosestEmoji({ r, g, b });
         emojiPromises.push(drawEmoji(ctx, closestEmoji, x, y));
@@ -233,8 +290,8 @@ export default function BufoMosaic() {
     if (mosaicDataURL) {
       const link = document.createElement("a");
       const outputName = fileName
-        ? `bufo-blended-a-masterpiece-${fileName}.jpg`
-        : "bufo-blended-a-masterpiece.jpg";
+        ? `bufo-blended-a-masterpiece-${fileName}.${hasTransparency ? "png" : "jpg"}`
+        : `bufo-blended-a-masterpiece.${hasTransparency ? "png" : "jpg"}`;
       link.download = outputName;
       link.href = mosaicDataURL;
       link.click();
@@ -316,9 +373,11 @@ export default function BufoMosaic() {
                     variant="outline"
                     onClick={() => {
                       setMosaicDataURL(null);
+                      setResizedImageDataURL(null);
                       setAspectRatio(null);
                       setImageDataURL(null);
                       setShowComparison(false);
+                      setHasTransparency(false);
                     }}
                   >
                     Start Fresh
@@ -346,6 +405,10 @@ export default function BufoMosaic() {
               )}
             </AnimatePresence>
           </div>
+
+          {/* Hidden canvas for resizing the input image */}
+          <canvas ref={resizeCanvasRef} className="hidden" />
+
           <AnimatePresence>
             {(imageDataURL || loading) && (
               <motion.div
@@ -354,16 +417,69 @@ export default function BufoMosaic() {
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.3 }}
                 className="relative w-full min-h-[300px] flex items-center justify-center rounded-lg border overflow-hidden"
+                style={{
+                  background: hasTransparency
+                    ? "repeating-conic-gradient(#f0f0f0 0% 25%, #ffffff 0% 50%) 50% / 20px 20px"
+                    : "white",
+                }}
               >
                 {imageDataURL && mosaicDataURL ? (
                   showComparison ? (
                     <BeforeAfterSlider
-                      beforeImage={imageDataURL}
+                      beforeImage={resizedImageDataURL || imageDataURL}
                       afterImage={mosaicDataURL}
                       className="overflow-hidden"
                     />
                   ) : (
-                    <img src={mosaicDataURL} alt="Mosaic" className="w-full" />
+                    <TransformWrapper
+                      initialScale={1}
+                      minScale={0.5}
+                      maxScale={4}
+                      centerOnInit={true}
+                      wheel={{ step: 0.1 }}
+                      doubleClick={{ mode: "reset" }}
+                    >
+                      {({ zoomIn, zoomOut, resetTransform }) => (
+                        <>
+                          <div className="absolute top-2 right-2 z-10 flex gap-1 bg-white/80 p-1 rounded-lg shadow-sm">
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => zoomIn()}
+                            >
+                              <PlusIcon className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => zoomOut()}
+                            >
+                              <MinusIcon className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => resetTransform()}
+                            >
+                              <RotateCcwIcon className="h-4 w-4" />
+                            </Button>
+                          </div>
+                          <TransformComponent
+                            wrapperClass="w-full h-full"
+                            contentClass="w-full h-full"
+                          >
+                            <img
+                              src={mosaicDataURL}
+                              alt="Mosaic"
+                              className="w-full"
+                            />
+                          </TransformComponent>
+                        </>
+                      )}
+                    </TransformWrapper>
                   )
                 ) : (
                   <motion.div
