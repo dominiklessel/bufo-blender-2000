@@ -1,19 +1,5 @@
-import {
-  Card,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import Image from "next/image";
 import BufoMosaic from "./components/bufo-mosaic";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
 
 export default function NewLayout() {
   return (
@@ -47,57 +33,11 @@ export default function NewLayout() {
         </div>
       </div>
       <BufoMosaic />
-      <div className="max-w-2xl mx-4 md:mx-auto mb-4 flex justify-end">
-        <Dialog>
-          <DialogTrigger asChild>
-            <Button variant="outline">
-              <Image
-                src="/all-the-bufo/angry-karen-bufo-would-like-to-speak-with-your-manager.png"
-                alt="Bufo would like to speak with your manager"
-                width={24}
-                height={24}
-              />
-              <span className="text-sm text-forest/80">
-                Where does Bufo store my data?
-              </span>
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 text-lg font-bold text-forest/80">
-                <Image
-                  src="/all-the-bufo/bufo-brings-magic-to-the-riot.gif"
-                  alt="Bufo Artist Logo"
-                  width={24}
-                  height={24}
-                  unoptimized
-                />
-                Bufo's Image Processing Magic
-                <Image
-                  src="/all-the-bufo/bufo-brings-magic-to-the-riot.gif"
-                  alt="Bufo Artist Logo"
-                  width={24}
-                  height={24}
-                  unoptimized
-                />
-              </DialogTitle>
-            </DialogHeader>
-            <div className="text-forest/80">
-              <p className="mt-2">
-                Bufo works his magic right here in your browser!
-              </p>
-              <ul className="list-disc list-inside mt-2">
-                <li>
-                  No file uploads needed – everything happens on your device
-                </li>
-                <li>Your images never leave your lily pad</li>
-                <li>Bufo respects your privacy and doesn't store any data</li>
-                <li>Just you and Bufo, creating masterpieces together</li>
-              </ul>
-              <p className="mt-2">Ribbiting locally with Bufo! 🌿</p>
-            </div>
-          </DialogContent>
-        </Dialog>
+      <div className="max-w-md mx-4 md:mx-auto mb-4">
+        <p className="text-xs px-6 text-center text-forest-700/80">
+          Bufo works its magic right here in your browser! No data leaves your
+          device — it's just you and Bufo, creating masterpieces together.
+        </p>
       </div>
     </div>
   );
