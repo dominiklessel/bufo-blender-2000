@@ -8,17 +8,24 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { poissonDiscSampler } from "@/lib/poisson-disc-sampler";
-import { emojiMetadata, type EmojiMetadata } from "./emoji-metadata";
+import { emojiMetadata } from "@/app/data/emoji-metadata";
 import { Card, CardContent } from "@/components/ui/card";
 import { BeforeAfterSlider } from "./before-after-slider";
 import NextImage from "next/image";
 import { cn } from "@/lib/utils";
+import { type WebEmojiMetadata } from "@/lib/common";
+import { RGB, RGBToHSL } from "@/lib/colors";
 
 export default function BufoMosaic() {
   const [imageDataURL, setImageDataURL] = useState<string | null>(null);
   const [mosaicDataURL, setMosaicDataURL] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showComparison, setShowComparison] = useState(false);
+
+  const [targetSize, setTargetSize] = useState(4096);
+  const [emojiDensity, setEmojiDensity] = useState(32);
+  const [emojiSize, setEmojiSize] = useState(64);
+
   const [aspectRatio, setAspectRatio] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [fileName, setFileName] = useState<string>("");
@@ -98,9 +105,6 @@ export default function BufoMosaic() {
   const createMosaic = async (img: HTMLImageElement) => {
     const canvas = canvasRef.current!;
     const ctx = canvas.getContext("2d")!;
-
-    // Set fixed output size to 2048x2048
-    const targetSize = 2048;
     const aspectRatio = img.width / img.height;
 
     // Calculate dimensions to maintain aspect ratio within 2048x2048
@@ -133,7 +137,7 @@ export default function BufoMosaic() {
     const sampler = poissonDiscSampler(
       canvas.width,
       canvas.height,
-      16, // Reduced minimum distance between emojis for higher density
+      emojiDensity, // Smaller = more emojis
     );
     let sample: number[] | undefined;
     const emojiPromises: Promise<void>[] = [];
@@ -154,7 +158,7 @@ export default function BufoMosaic() {
         const g = originalImageData.data[pixelIndex + 1];
         const b = originalImageData.data[pixelIndex + 2];
 
-        const closestEmoji = findClosestEmoji(r, g, b);
+        const closestEmoji = findClosestEmoji({ r, g, b });
         emojiPromises.push(drawEmoji(ctx, closestEmoji, x, y));
       }
     }
@@ -162,17 +166,33 @@ export default function BufoMosaic() {
     await Promise.all(emojiPromises);
   };
 
-  const findClosestEmoji = (r: number, g: number, b: number): EmojiMetadata => {
+  const findClosestEmoji = (inputRgb: RGB): WebEmojiMetadata => {
+    const inputHSL = RGBToHSL(inputRgb);
     let closestEmoji = emojiMetadata[0];
     let minDistance = Number.POSITIVE_INFINITY;
 
     for (const emoji of emojiMetadata) {
-      const { dominantColor } = emoji;
-      const distance = Math.sqrt(
-        (r - dominantColor.r) ** 2 +
-          (g - dominantColor.g) ** 2 +
-          (b - dominantColor.b) ** 2,
+      const { dominantHSL } = emoji;
+
+      // Calculate HSL distance with special handling for hue
+      // Hue is circular (0° and 360° are the same), so we need special calculation
+      const hueDiff = Math.min(
+        Math.abs(inputHSL.h - dominantHSL.h),
+        360 - Math.abs(inputHSL.h - dominantHSL.h),
       );
+
+      // Weight the components (these weights can be adjusted)
+      // Hue is most important, followed by saturation, then lightness
+      const hueWeight = 1.0;
+      const satWeight = 0.8;
+      const lightWeight = 0.6;
+
+      const distance = Math.sqrt(
+        hueWeight * (hueDiff / 180) ** 2 +
+          satWeight * ((inputHSL.s - dominantHSL.s) / 100) ** 2 +
+          lightWeight * ((inputHSL.l - dominantHSL.l) / 100) ** 2,
+      );
+
       if (distance < minDistance) {
         minDistance = distance;
         closestEmoji = emoji;
@@ -184,7 +204,7 @@ export default function BufoMosaic() {
 
   const drawEmoji = (
     ctx: CanvasRenderingContext2D,
-    emoji: EmojiMetadata,
+    emoji: WebEmojiMetadata,
     x: number,
     y: number,
   ): Promise<void> => {
@@ -195,8 +215,13 @@ export default function BufoMosaic() {
         ctx.save();
         ctx.translate(x, y);
         ctx.rotate(Math.random() * Math.PI * 2);
-        const size = 32; // Fixed size for consistency
-        ctx.drawImage(emojiImg, -size / 2, -size / 2, size, size);
+        ctx.drawImage(
+          emojiImg,
+          -emojiSize / 2,
+          -emojiSize / 2,
+          emojiSize,
+          emojiSize,
+        );
         ctx.restore();
         resolve();
       };
@@ -310,8 +335,8 @@ export default function BufoMosaic() {
                 >
                   <div className="flex items-center justify-center">
                     <NextImage
-                      src="/all-the-bufo/bufo-loading.gif"
-                      alt="Bufo Artist Logo"
+                      src="/bufo-loading.gif"
+                      alt="Loading ..."
                       width={40}
                       height={40}
                       unoptimized
