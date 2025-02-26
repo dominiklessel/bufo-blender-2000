@@ -17,6 +17,8 @@ const anek = Anek_Latin({
   weight: ["500", "600", "700"],
 });
 
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
   title: "Bufo Blender 2000",
   description: "Transform your images into a ribbiting masterpiece!",
