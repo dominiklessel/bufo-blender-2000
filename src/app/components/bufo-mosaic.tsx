@@ -1,7 +1,8 @@
 "use client";
 
-import type React from "react";
 import { useState, useRef, useEffect } from "react";
+import { useLocalStorage } from "@uidotdev/usehooks";
+
 import { motion, AnimatePresence } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,10 +14,21 @@ import { Card, CardContent } from "@/components/ui/card";
 import { BeforeAfterSlider } from "./before-after-slider";
 import NextImage from "next/image";
 import { cn } from "@/lib/utils";
-import { type WebEmojiMetadata } from "@/lib/common";
 import { RGB, RGBToHSL } from "@/lib/colors";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
-import { PlusIcon, MinusIcon, RotateCcwIcon } from "lucide-react";
+import { PlusIcon, MinusIcon, RotateCcwIcon, CogIcon } from "lucide-react";
+import {
+  Sheet,
+  SheetTrigger,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet";
+
+import type React from "react";
+import { type WebEmojiMetadata } from "@/lib/common";
+import { Slider } from "@/components/ui/slider";
 
 export default function BufoMosaic() {
   const [imageDataURL, setImageDataURL] = useState<string | null>(null);
@@ -28,13 +40,21 @@ export default function BufoMosaic() {
   const [showComparison, setShowComparison] = useState(false);
   const [hasTransparency, setHasTransparency] = useState(false);
 
-  const [targetSize, setTargetSize] = useState(4096);
-  const [emojiDensity, setEmojiDensity] = useState(32);
-  const [emojiSize, setEmojiSize] = useState(64);
+  const [targetSize, setTargetSize] = useLocalStorage("bufo-target-size", 4096);
+  const [emojiSpacing, setEmojiSpacing] = useLocalStorage(
+    "bufo-emoji-density",
+    24,
+  );
+  const [emojiSize, setEmojiSize] = useLocalStorage("bufo-emoji-size", 64);
+  const [useRgbMatching, setUseRgbMatching] = useLocalStorage(
+    "bufo-use-rgb-matching",
+    false,
+  );
 
   const [aspectRatio, setAspectRatio] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [fileName, setFileName] = useState<string>("");
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const resizeCanvasRef = useRef<HTMLCanvasElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -190,7 +210,7 @@ export default function BufoMosaic() {
     const sampler = poissonDiscSampler(
       canvas.width,
       canvas.height,
-      emojiDensity, // Smaller = more emojis
+      emojiSpacing, // Smaller = more emojis
     );
     let sample: number[] | undefined;
     const emojiPromises: Promise<void>[] = [];
@@ -215,7 +235,10 @@ export default function BufoMosaic() {
         // Skip fully transparent pixels
         if (a < 10) continue;
 
-        const closestEmoji = findClosestEmoji({ r, g, b });
+        const pixelRgb = { r, g, b };
+        const closestEmoji = useRgbMatching
+          ? findClosestEmojiRgb(pixelRgb)
+          : findClosestEmojiHsl(pixelRgb);
         emojiPromises.push(drawEmoji(ctx, closestEmoji, x, y));
       }
     }
@@ -223,7 +246,7 @@ export default function BufoMosaic() {
     await Promise.all(emojiPromises);
   };
 
-  const findClosestEmoji = (inputRgb: RGB): WebEmojiMetadata => {
+  const findClosestEmojiHsl = (inputRgb: RGB): WebEmojiMetadata => {
     const inputHSL = RGBToHSL(inputRgb);
     let closestEmoji = emojiMetadata[0];
     let minDistance = Number.POSITIVE_INFINITY;
@@ -248,6 +271,34 @@ export default function BufoMosaic() {
         hueWeight * (hueDiff / 180) ** 2 +
           satWeight * ((inputHSL.s - dominantHSL.s) / 100) ** 2 +
           lightWeight * ((inputHSL.l - dominantHSL.l) / 100) ** 2,
+      );
+
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestEmoji = emoji;
+      }
+    }
+
+    return closestEmoji;
+  };
+
+  const findClosestEmojiRgb = (inputRgb: RGB): WebEmojiMetadata => {
+    let closestEmoji = emojiMetadata[0];
+    let minDistance = Number.POSITIVE_INFINITY;
+
+    for (const emoji of emojiMetadata) {
+      const { dominantRGB } = emoji;
+
+      // Calculate Euclidean distance in RGB space
+      // We can apply weights to different channels if needed
+      const rWeight = 0.3; // Red contributes most to perceived brightness
+      const gWeight = 0.59; // Green contributes most to perceived brightness
+      const bWeight = 0.11; // Blue contributes least to perceived brightness
+
+      const distance = Math.sqrt(
+        rWeight * ((inputRgb.r - dominantRGB.r) / 255) ** 2 +
+          gWeight * ((inputRgb.g - dominantRGB.g) / 255) ** 2 +
+          bWeight * ((inputRgb.b - dominantRGB.b) / 255) ** 2,
       );
 
       if (distance < minDistance) {
@@ -299,207 +350,298 @@ export default function BufoMosaic() {
   };
 
   return (
-    <Card className="max-w-2xl mx-4 md:mx-auto mb-4">
-      <CardContent className="p-6">
-        <div className="flex flex-col items-center gap-4">
-          <div
-            className={cn(
-              "w-full",
-              !mosaicDataURL && !loading ? "h-[120px]" : "h-[40px]",
-            )}
-          >
-            <AnimatePresence mode="wait">
-              {!mosaicDataURL && !loading ? (
-                <motion.div
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 20 }}
-                  transition={{ duration: 0.15 }}
-                  className="w-full h-full"
-                >
-                  <div
-                    className={cn(
-                      "w-full h-full border-2 border-dashed rounded-lg flex flex-col items-center justify-center cursor-pointer transition-colors",
-                      isDragging
-                        ? "border-primary bg-primary/10"
-                        : "border-forest-700/25 hover:border-forest-700/50",
-                    )}
-                    onDragOver={handleDragOver}
-                    onDragLeave={handleDragLeave}
-                    onDrop={handleDrop}
-                    onClick={() => inputRef.current?.click()}
+    <>
+      <Card className="max-w-2xl mx-4 md:mx-auto mb-4">
+        <CardContent className="p-6">
+          <div className="flex flex-col items-center gap-4">
+            <div
+              className={cn(
+                "w-full",
+                !mosaicDataURL && !loading ? "h-[120px]" : "h-[40px]",
+              )}
+            >
+              <AnimatePresence mode="wait">
+                {!mosaicDataURL && !loading ? (
+                  <motion.div
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 20 }}
+                    transition={{ duration: 0.15 }}
+                    className="w-full h-full"
                   >
-                    <input
-                      ref={inputRef}
-                      type="file"
-                      accept="image/*"
-                      onChange={handleFileUpload}
-                      className="hidden"
-                    />
-                    <div className="flex flex-col items-center gap-2 text-forest-700">
+                    <div
+                      className={cn(
+                        "w-full h-full border-2 border-dashed rounded-lg flex flex-col items-center justify-center cursor-pointer transition-colors",
+                        isDragging
+                          ? "border-primary bg-primary/10"
+                          : "border-forest-700/25 hover:border-forest-700/50",
+                      )}
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                      onClick={() => inputRef.current?.click()}
+                    >
+                      <input
+                        ref={inputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleFileUpload}
+                        className="hidden"
+                      />
+                      <div className="flex flex-col items-center gap-2 text-forest-700">
+                        <NextImage
+                          src="/all-the-bufo/bufo-please.png"
+                          alt="Bufo Artist Logo"
+                          width={24}
+                          height={24}
+                          unoptimized
+                        />
+                        <p className="text-sm">
+                          Drag and drop an image here, or click to select
+                        </p>
+                      </div>
+                    </div>
+                  </motion.div>
+                ) : mosaicDataURL && !loading ? (
+                  <motion.div
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 20 }}
+                    transition={{ duration: 0.15 }}
+                    className="flex w-full items-center justify-between"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Button onClick={handleSave}>Download Masterpiece</Button>
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          id="comparison-mode"
+                          checked={showComparison}
+                          onCheckedChange={setShowComparison}
+                        />
+                        <Label htmlFor="comparison-mode">Comparison mode</Label>
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setMosaicDataURL(null);
+                        setResizedImageDataURL(null);
+                        setAspectRatio(null);
+                        setImageDataURL(null);
+                        setShowComparison(false);
+                        setHasTransparency(false);
+                      }}
+                    >
+                      Start Fresh
+                    </Button>
+                  </motion.div>
+                ) : null}
+                {loading && (
+                  <motion.div
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 20 }}
+                    transition={{ duration: 0.15 }}
+                    className="w-full h-full"
+                  >
+                    <div className="flex items-center justify-center">
                       <NextImage
-                        src="/all-the-bufo/bufo-please.png"
-                        alt="Bufo Artist Logo"
-                        width={24}
-                        height={24}
+                        src="/bufo-loading.gif"
+                        alt="Loading ..."
+                        width={40}
+                        height={40}
                         unoptimized
                       />
-                      <p className="text-sm">
-                        Drag and drop an image here, or click to select
-                      </p>
                     </div>
-                  </div>
-                </motion.div>
-              ) : mosaicDataURL && !loading ? (
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* Hidden canvas for resizing the input image */}
+            <canvas ref={resizeCanvasRef} className="hidden" />
+
+            <AnimatePresence>
+              {(imageDataURL || loading) && (
                 <motion.div
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 20 }}
-                  transition={{ duration: 0.15 }}
-                  className="flex w-full items-center justify-between"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.3 }}
+                  className="relative w-full min-h-[300px] flex items-center justify-center rounded-lg border overflow-hidden"
+                  style={{
+                    background: hasTransparency
+                      ? "repeating-conic-gradient(#f0f0f0 0% 25%, #ffffff 0% 50%) 50% / 20px 20px"
+                      : "white",
+                  }}
                 >
-                  <div className="flex items-center gap-2">
-                    <Button onClick={handleSave}>Download Masterpiece</Button>
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        id="comparison-mode"
-                        checked={showComparison}
-                        onCheckedChange={setShowComparison}
+                  {imageDataURL && mosaicDataURL ? (
+                    showComparison ? (
+                      <BeforeAfterSlider
+                        beforeImage={resizedImageDataURL || imageDataURL}
+                        afterImage={mosaicDataURL}
+                        className="overflow-hidden"
                       />
-                      <Label htmlFor="comparison-mode">Comparison mode</Label>
-                    </div>
-                  </div>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setMosaicDataURL(null);
-                      setResizedImageDataURL(null);
-                      setAspectRatio(null);
-                      setImageDataURL(null);
-                      setShowComparison(false);
-                      setHasTransparency(false);
-                    }}
-                  >
-                    Start Fresh
-                  </Button>
-                </motion.div>
-              ) : null}
-              {loading && (
-                <motion.div
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 20 }}
-                  transition={{ duration: 0.15 }}
-                  className="w-full h-full"
-                >
-                  <div className="flex items-center justify-center">
-                    <NextImage
-                      src="/bufo-loading.gif"
-                      alt="Loading ..."
-                      width={40}
-                      height={40}
-                      unoptimized
-                    />
-                  </div>
+                    ) : (
+                      <TransformWrapper
+                        initialScale={1}
+                        minScale={0.5}
+                        maxScale={4}
+                        centerOnInit={true}
+                        wheel={{ step: 0.1 }}
+                        doubleClick={{ mode: "reset" }}
+                      >
+                        {({ zoomIn, zoomOut, resetTransform }) => (
+                          <>
+                            <div className="absolute top-2 right-2 z-10 flex gap-1 bg-white/80 p-1 rounded-lg shadow-sm">
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => zoomIn()}
+                              >
+                                <PlusIcon className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => zoomOut()}
+                              >
+                                <MinusIcon className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => resetTransform()}
+                              >
+                                <RotateCcwIcon className="h-4 w-4" />
+                              </Button>
+                            </div>
+                            <TransformComponent
+                              wrapperClass="w-full h-full"
+                              contentClass="w-full h-full"
+                            >
+                              <img
+                                src={mosaicDataURL}
+                                alt="Mosaic"
+                                className="w-full"
+                              />
+                            </TransformComponent>
+                          </>
+                        )}
+                      </TransformWrapper>
+                    )
+                  ) : (
+                    <motion.div
+                      className="w-full relative"
+                      animate={{
+                        aspectRatio: aspectRatio ? `${aspectRatio}` : "16/9",
+                      }}
+                      transition={{ duration: 0.3 }}
+                    >
+                      <canvas
+                        ref={canvasRef}
+                        className="w-full h-full object-contain"
+                      />
+                    </motion.div>
+                  )}
                 </motion.div>
               )}
             </AnimatePresence>
           </div>
-
-          {/* Hidden canvas for resizing the input image */}
-          <canvas ref={resizeCanvasRef} className="hidden" />
-
-          <AnimatePresence>
-            {(imageDataURL || loading) && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.3 }}
-                className="relative w-full min-h-[300px] flex items-center justify-center rounded-lg border overflow-hidden"
-                style={{
-                  background: hasTransparency
-                    ? "repeating-conic-gradient(#f0f0f0 0% 25%, #ffffff 0% 50%) 50% / 20px 20px"
-                    : "white",
+        </CardContent>
+      </Card>
+      <Sheet>
+        <SheetTrigger asChild>
+          <Button className="fixed bottom-4 right-4 p-2" variant="outline">
+            <CogIcon className="h-4 w-4" />
+          </Button>
+        </SheetTrigger>
+        <SheetContent>
+          <SheetHeader>
+            <SheetTitle>Processing Options</SheetTitle>
+            <SheetDescription>
+              Tell Bufo how you want to process your image. Settings are written
+              to local storage.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="mt-4 flex flex-col gap-4">
+            <div className="flex items-center gap-2">
+              <Label className="w-[100px] shrink-0" htmlFor="target-size">
+                Target size
+              </Label>
+              <Slider
+                id="target-size"
+                value={[targetSize]}
+                min={1024}
+                max={8192}
+                step={128}
+                onValueChange={(value) => setTargetSize(value[0])}
+              />
+              <div className="text-sm font-mono text-muted-foreground">
+                {targetSize.toString().padStart(3, "0")}px
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Label className="w-[100px] shrink-0" htmlFor="emoji-size">
+                Emoji size
+              </Label>
+              <Slider
+                id="emoji-size"
+                value={[emojiSize]}
+                min={16}
+                max={64}
+                step={8}
+                onValueChange={(value) => setEmojiSize(value[0])}
+              />
+              <div className="text-sm font-mono text-muted-foreground">
+                {emojiSize.toString().padStart(3, "0")}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Label className="w-[100px] shrink-0" htmlFor="emoji-spacing">
+                Emoji spacing
+              </Label>
+              <Slider
+                id="emoji-spacing"
+                value={[emojiSpacing]}
+                min={8}
+                max={128}
+                step={8}
+                onValueChange={(value) => setEmojiSpacing(value[0])}
+              />
+              <div className="text-sm font-mono text-muted-foreground">
+                {emojiSpacing.toString().padStart(3, "0")}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Label htmlFor="rgb-mode" className="w-[100px] shrink-0">
+                RGB matching
+              </Label>
+              <Switch
+                id="rgb-mode"
+                checked={useRgbMatching}
+                onCheckedChange={setUseRgbMatching}
+              />
+            </div>
+            <div className="flex justify-end">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setTargetSize(4096);
+                  setEmojiSize(64);
+                  setEmojiSpacing(24);
+                  setUseRgbMatching(false);
                 }}
               >
-                {imageDataURL && mosaicDataURL ? (
-                  showComparison ? (
-                    <BeforeAfterSlider
-                      beforeImage={resizedImageDataURL || imageDataURL}
-                      afterImage={mosaicDataURL}
-                      className="overflow-hidden"
-                    />
-                  ) : (
-                    <TransformWrapper
-                      initialScale={1}
-                      minScale={0.5}
-                      maxScale={4}
-                      centerOnInit={true}
-                      wheel={{ step: 0.1 }}
-                      doubleClick={{ mode: "reset" }}
-                    >
-                      {({ zoomIn, zoomOut, resetTransform }) => (
-                        <>
-                          <div className="absolute top-2 right-2 z-10 flex gap-1 bg-white/80 p-1 rounded-lg shadow-sm">
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => zoomIn()}
-                            >
-                              <PlusIcon className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => zoomOut()}
-                            >
-                              <MinusIcon className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => resetTransform()}
-                            >
-                              <RotateCcwIcon className="h-4 w-4" />
-                            </Button>
-                          </div>
-                          <TransformComponent
-                            wrapperClass="w-full h-full"
-                            contentClass="w-full h-full"
-                          >
-                            <img
-                              src={mosaicDataURL}
-                              alt="Mosaic"
-                              className="w-full"
-                            />
-                          </TransformComponent>
-                        </>
-                      )}
-                    </TransformWrapper>
-                  )
-                ) : (
-                  <motion.div
-                    className="w-full relative"
-                    animate={{
-                      aspectRatio: aspectRatio ? `${aspectRatio}` : "16/9",
-                    }}
-                    transition={{ duration: 0.3 }}
-                  >
-                    <canvas
-                      ref={canvasRef}
-                      className="w-full h-full object-contain"
-                    />
-                  </motion.div>
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-      </CardContent>
-    </Card>
+                Reset
+              </Button>
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
+    </>
   );
 }

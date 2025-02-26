@@ -1,6 +1,6 @@
 ---
-description: When writing code
-globs: *.tsx, *.ts
+description: When writing code TypeScript code
+globs: **/*.{ts,tsx}
 alwaysApply: false
 ---
 # TypeScript / React / Next.js rules
